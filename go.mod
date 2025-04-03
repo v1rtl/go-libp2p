@@ -124,3 +124,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	lukechampine.com/blake3 v1.4.0 // indirect
 )
+
+replace github.com/multiformats/go-multistream => github.com/multiformats/go-multistream v0.6.1-0.20250402000044-f8b2fec1e8f0
