@@ -1,8 +1,6 @@
 package quicreuse
 
 import (
-	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -13,50 +11,22 @@ import (
 	"github.com/quic-go/quic-go"
 )
 
-type refCountedQuicTransport interface {
+type RefCountedQUICTransport interface {
 	QUICTransport
-	LocalAddr() net.Addr
 	// count transport reference
 	DecreaseCount()
 	IncreaseCount()
 }
 
 type singleOwnerTransport struct {
-	Transport QUICTransport
-
-	// Used to write packets directly around QUIC.
-	packetConn net.PacketConn
+	QUICTransport
 }
 
 var _ QUICTransport = &singleOwnerTransport{}
+var _ RefCountedQUICTransport = (*singleOwnerTransport)(nil)
 
 func (c *singleOwnerTransport) IncreaseCount() {}
-func (c *singleOwnerTransport) DecreaseCount() { c.Transport.Close() }
-func (c *singleOwnerTransport) LocalAddr() net.Addr {
-	return c.packetConn.LocalAddr()
-}
-
-func (c *singleOwnerTransport) Dial(ctx context.Context, addr net.Addr, tlsConf *tls.Config, conf *quic.Config) (quic.Connection, error) {
-	return c.Transport.Dial(ctx, addr, tlsConf, conf)
-}
-
-func (c *singleOwnerTransport) ReadNonQUICPacket(ctx context.Context, b []byte) (int, net.Addr, error) {
-	return c.Transport.ReadNonQUICPacket(ctx, b)
-}
-
-func (c *singleOwnerTransport) Close() error {
-	// TODO(when we drop support for go 1.19) use errors.Join
-	c.Transport.Close()
-	return c.packetConn.Close()
-}
-
-func (c *singleOwnerTransport) WriteTo(b []byte, addr net.Addr) (int, error) {
-	return c.Transport.WriteTo(b, addr)
-}
-
-func (c *singleOwnerTransport) Listen(tlsConf *tls.Config, conf *quic.Config) (QUICListener, error) {
-	return c.Transport.Listen(tlsConf, conf)
-}
+func (c *singleOwnerTransport) DecreaseCount() { _ = c.QUICTransport.Close() }
 
 // Constant. Defined as variables to simplify testing.
 var (
@@ -66,9 +36,6 @@ var (
 
 type refcountedTransport struct {
 	QUICTransport
-
-	// Used to write packets directly around QUIC.
-	packetConn net.PacketConn
 
 	mutex       sync.Mutex
 	refCount    int
@@ -123,19 +90,7 @@ func (c *refcountedTransport) Close() error {
 		return nil
 	}
 
-	return errors.Join(c.QUICTransport.Close(), c.packetConn.Close())
-}
-
-func (c *refcountedTransport) WriteTo(b []byte, addr net.Addr) (int, error) {
-	return c.QUICTransport.WriteTo(b, addr)
-}
-
-func (c *refcountedTransport) LocalAddr() net.Addr {
-	return c.packetConn.LocalAddr()
-}
-
-func (c *refcountedTransport) Listen(tlsConf *tls.Config, conf *quic.Config) (QUICListener, error) {
-	return c.QUICTransport.Listen(tlsConf, conf)
+	return errors.Join(c.QUICTransport.Close())
 }
 
 func (c *refcountedTransport) DecreaseCount() {
@@ -256,7 +211,7 @@ func (r *reuse) gc() {
 	}
 }
 
-func (r *reuse) transportWithAssociationForDial(association any, network string, raddr *net.UDPAddr) (*refcountedTransport, error) {
+func (r *reuse) TransportWithAssociationForDial(association any, network string, raddr *net.UDPAddr) (*refcountedTransport, error) {
 	var ip *net.IP
 
 	// Only bother looking up the source address if we actually _have_ non 0.0.0.0 listeners.
@@ -340,7 +295,6 @@ func (r *reuse) transportForDialLocked(association any, network string, source *
 				TokenGeneratorKey: r.tokenGeneratorKey,
 			},
 		},
-		packetConn: conn,
 	}
 	r.globalDialers[conn.LocalAddr().(*net.UDPAddr).Port] = tr
 	return tr, nil
@@ -360,7 +314,7 @@ func (r *reuse) AddTransport(tr *refcountedTransport, laddr *net.UDPAddr) error 
 	return nil
 }
 
-func (r *reuse) AssertTransportExists(tr refCountedQuicTransport) error {
+func (r *reuse) AssertTransportExists(tr RefCountedQUICTransport) error {
 	t, ok := tr.(*refcountedTransport)
 	if !ok {
 		return fmt.Errorf("invalid transport type: expected: *refcountedTransport, got: %T", tr)
@@ -433,7 +387,6 @@ func (r *reuse) TransportForListen(network string, laddr *net.UDPAddr) (*refcoun
 				StatelessResetKey: r.statelessResetKey,
 			},
 		},
-		packetConn: conn,
 	}
 	tr.IncreaseCount()
 
