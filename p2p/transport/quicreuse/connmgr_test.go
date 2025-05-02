@@ -152,7 +152,7 @@ func TestConnectionPassedToQUICForDialing(t *testing.T) {
 	netw, _, err := manet.DialArgs(raddr)
 	require.NoError(t, err)
 
-	quicTr, err := cm.TransportForDial(netw, naddr)
+	quicTr, err := cm.transportForDial(netw, naddr)
 
 	require.NoError(t, err, "dial error")
 	defer quicTr.Close()

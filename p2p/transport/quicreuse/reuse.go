@@ -14,19 +14,11 @@ import (
 )
 
 type refCountedQuicTransport interface {
+	QUICTransport
 	LocalAddr() net.Addr
-
-	// Used to send packets directly around QUIC. Useful for hole punching.
-	WriteTo([]byte, net.Addr) (int, error)
-
-	Close() error
-
 	// count transport reference
 	DecreaseCount()
 	IncreaseCount()
-
-	Dial(ctx context.Context, addr net.Addr, tlsConf *tls.Config, conf *quic.Config) (quic.Connection, error)
-	Listen(tlsConf *tls.Config, conf *quic.Config) (QUICListener, error)
 }
 
 type singleOwnerTransport struct {
